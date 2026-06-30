@@ -1,118 +1,260 @@
 # pyneutrace: Neutron Ray Tracing Python Package
 
-A pure Python-based Monte Carlo neutron ray-tracing package for neutron instrument design, structural optimization, resolution calculation, and virtual experiments. 
+`pyneutrace` is a pure-Python Monte Carlo neutron ray-tracing package for building virtual neutron instruments, tracing large ray batches with vectorized `numpy` kernels, and analyzing beam transport, Bragg selection, sample scattering, and detector response.
+
+The current codebase supports both single-component studies and assembled beamlines with 3D geometry export, analyzer cascades, multichannel analyzer banks, checkpointed downstream re-runs, and SciPy-based instrument optimization.
 
 ---
 
 ## Features
 
-- **High-Performance Tracing** — Monte Carlo neutron ray tracing simulation utilizing fully vectorized operations via `numpy` to trace millions of rays simultaneously without the need for C/C++ compilation.
-- **Modular Pipeline** — Easy-to-use component assembly system to seamlessly chain neutron optics, sample environments, and detectors.
-- **Built-in Crystallography** — Custom CIF parser natively built into the package to handle real-world crystal structures for powder and single-crystal scattering.
-- **Advanced Ray Checkpointing** — Transparently export and merge live neutron states (with metadata validation) to overcome extreme attenuation and accelerate complex downstream simulations.
-- **Optimization Engine** — SciPy-backed `InstrumentOptimizer` to tune beamline parameters (e.g., guide focus, chopper phase) for maximum flux/resolution.
+- **Vectorized Monte Carlo Transport**: traces large neutron batches with `numpy` arrays and component-level `propagate_TOF()` kernels.
+- **Instrument Assembly**: uses `InstrumentAssemble` to connect optics, samples, analyzers, monitors, and helper stages through consistent 4x4 transforms.
+- **3D Geometry Rendering**: components expose `get_mesh_pipeline()` so assembled instruments can be visualized with PyVista through `InstrumentAssemble.visualize_3d()`.
+- **Analyzer Stack**: includes `Analyzer`, `VAnalyzer`, `CascadeAnalyzer`, and `MultiCascadeAnalyzer` for single-analyzer, vertical-analyzer, cascade, and multichannel bank studies.
+- **Built-in Diagnostics**: analyzers now expose lightweight `exit_capture` datasets for downstream plotting and debugging without embedding physical monitor logic.
+- **Checkpoint / Resume Workflow**: `ExportRays` and `ImportRays` support staged simulations for strongly attenuating beamlines.
+- **Optimization Support**: `InstrumentOptimizer` registers component parameters, maps them into optimization vectors, and evaluates objective functions over an assembled beamline.
+- **Plotting Utilities**: `InstrumentSimPlot` provides transmission summaries and virtual-monitor-style beam snapshots at any stage.
 
 ---
 
-## Directory Structure
+## Package Layout
 
 ```text
 pyneutrace/
 ├── src/
-│   └── pyneutrace/ 
-│       ├── __init__.py 
-│       ├── constants.py       # Physical constants and standard D-spacings
-│       ├── utils.py           # Core utilities, including the custom CIF parser
-│       ├── instrument/        # InstrumentAssemble pipeline manager
-│       ├── components/        # Optics, samples, choppers, and detectors
-│       ├── simulation/        # InstrumentOptimizer
-│       └── visualization/     # InstrumentSimPlot for statistical visualization
-├── test/                      # Comprehensive test suite covering all components
-├── pyproject.toml             # Package build configuration
+│   └── pyneutrace/
+│       ├── constants.py
+│       ├── utils.py
+│       ├── components/
+│       ├── instrument/
+│       ├── simulation/
+│       └── visualization/
+├── test/
+├── pyproject.toml
 └── README.md
 ```
+
+- `components/`: sources, guides, choppers, analyzers, samples, collimators, monitors, and helper components
+- `instrument/`: assembled beamline execution and 3D geometry handling
+- `simulation/`: parameter registration and optimization via `InstrumentOptimizer`
+- `visualization/`: Matplotlib-based result summaries
+- `test/`: example scripts and regression tests covering component and beamline workflows
+
+---
+
+## Installation
+
+Install the package from the project root:
+
+```bash
+pip install .
+```
+
+For 3D geometry rendering, ensure PyVista is available in your environment.
 
 ---
 
 ## Quick Start
 
-1. **Installation:** Run `pip install .` in the project root path for the core engine, or `pip install ".[gui]"` to include 3D visualization dependencies.
-2. **Build your instrument:** Instantiate components and chain them using the `InstrumentAssemble` class.
-3. **Run the simulation:** Execute `pipeline.run(num_rays=1_000_000)` to trace the beam.
-4. **Visualize 3D Geometry:** Call `pipeline.visualize_3d()` to render the physical instrument layout via PyVista.
-5. **Analyze Results:** Use the `InstrumentSimPlot` class to visualize transmission drop-off and spatial/energy beam profiles at any stage.
+```python
+from pyneutrace.components import NSource, Spacer, NeutronGuide, Monitor
+from pyneutrace.instrument.instrumentassemble import InstrumentAssemble
+
+beamline = InstrumentAssemble(name="Simple Beamline")
+beamline.add_component("Source", NSource(entry_w=40, entry_h=40, exit_w=40, exit_h=40, length=100))
+beamline.add_component("Spacer", Spacer(entry_w=40, entry_h=40, exit_w=40, exit_h=40, length=500))
+beamline.add_component("Guide", NeutronGuide(entry_w=40, entry_h=40, exit_w=30, exit_h=30, length=2000))
+beamline.add_component("Monitor", Monitor(half_w=15, half_h=15))
+
+pos, vel, time, weight = beamline.run(num_rays=100000)
+beamline.print_summary()
+```
+
+Useful follow-up operations:
+
+- `beamline.run_until("Guide", ...)`: stop at an intermediate stage
+- `beamline.get_history()`: inspect per-stage transmission history
+- `beamline.visualize_3d()`: render the assembled geometry
+- `InstrumentSimPlot.plot_transmission_summary(beamline)`: plot transmission from `history_log`
 
 ---
 
-## User Interface
+## Main Public API
 
-### Available Components (`pyneutrace.components`)
+### Components (`pyneutrace.components`)
 
-| Component Class | Description |
-|---|---|
-| **NeutronSource** | Continuous neutron source (reactor) with a dual-temperature Maxwellian flux spectrum. |
-| **Moderator** | Pulsed neutron source (spallation) with wavelength-dependent Ikeda-Carpenter pulse shaping. |
-| **NeutronGuide** | Straight or tapered supermirror guide (supports m-value reflectivity decay). |
-| **CurvedGuide** | Horizontally curved supermirror bender for filtering fast neutrons and gammas. |
-| **Elliptic / Parabolic Guides**| Focusing optic guides (Single Elliptic, Double Elliptic, Double Parabolic). |
-| **DiskChopper** | Standard rotating disk chopper for pulse shaping and order sorting. |
-| **Straight/Curved FermiChopper**| High-speed rotating slit packages for precise energy selection. |
-| **VelSelector** | Mechanical velocity selector (helical turbine) for monochromatic beam selection. |
-| **Monochromator / Analyzer** | Single crystal (e.g., PG, Si, Ge) arrays to select specific neutron energies via Bragg's law. |
-| **PowderSample** | Realistic sample environment supporting CIF loading and Debye-Scherrer cone diffraction. |
-| **VRodSample** | Cylindrical sample demonstrating isotropic elastic scattering. |
-| **Monitor / CylindMonitor** | Flat and curved Position Sensitive Detectors (PSD) for capturing 2D spatial and 1D energy histograms. |
-| **Soller / RadCollimator** | Linear and radial collimation packages to define beam divergence. |
-| **ExportRays / ImportRays** | I/O components to checkpoint live beams to disk and merge multiple runs. |
-| **Spacer** | A virtual component used to advance the beam a specific distance in empty space. |
-
-### Core Pipeline (`pyneutrace.instrument`)
+#### Sources
 
 | Class | Description |
 |---|---|
-| **InstrumentAssemble** | The central pipeline manager. Handles the addition of components, calculates global 4x4 coordinate transformations, and executes the sequential Monte Carlo propagation (`propagate_TOF`). |
+| `NeutronSource` | Continuous source with a reactor-style spectral model. |
+| `NSource` | Geometric source used heavily in test and beamline assembly workflows. |
+| `Moderator` | Pulsed source with time structure for TOF studies. |
+
+#### Beam Transport
+
+| Class | Description |
+|---|---|
+| `Spacer` | Empty-space propagation between physical components. |
+| `NeutronGuide` | Straight or tapered guide. |
+| `CurvedGuide` | Horizontally curved guide / bender. |
+| `SingleEllipticGuide` | Single elliptic focusing guide. |
+| `DoubleEllipticGuide` | Double elliptic focusing guide. |
+| `DoubleParabolicGuide` | Double parabolic guide. |
+| `Soller` | Linear collimator. |
+| `RadCollimator` | Radial collimator for sample-centred scattered beams. |
+
+#### Choppers And Selectors
+
+| Class | Description |
+|---|---|
+| `DiskChopper` | Rotating disk chopper. |
+| `StraightFermiChopper` | Straight-slit Fermi chopper. |
+| `CurvedFermiChopper` | Curved Fermi chopper. |
+| `VelSelector` | Mechanical velocity selector. |
+
+#### Bragg Optics
+
+| Class | Description |
+|---|---|
+| `Monochromator` | Single Bragg optic in the primary beam. |
+| `Analyzer` | Analyzer wrapper built on the monochromator-style geometry. |
+| `VAnalyzer` | Vertical analyzer with sample-centred branch support and explicit entry/exit transforms. |
+| `CascadeAnalyzer` | Ordered list of `VAnalyzer` stages sharing the same branch frame. |
+| `MultiCascadeAnalyzer` | Bank of horizontal channels, each containing a `CascadeAnalyzer`. |
+
+#### Samples
+
+| Class | Description |
+|---|---|
+| `VRodSample` | Simple rod sample / isotropic elastic scattering example. |
+| `PowderSample` | Powder diffraction sample with CIF-based crystallography support. |
+| `SingleCrystalSample` | Single-crystal scattering component. |
+
+#### Monitors And Helper Stages
+
+| Class | Description |
+|---|---|
+| `Monitor` | Flat passive monitor in a planar exit frame. |
+| `CylindMonitor` | Cylindrical PSD-style monitor in a sample-centred geometry. |
+| `VirtualFilterAndMultiplier` | Statistical helper stage for band filtering and multiplicative resampling. |
+| `ExportRays` / `ImportRays` | Ray checkpointing and downstream resume utilities. |
+
+### Instrument Assembly (`pyneutrace.instrument`)
+
+| Class | Description |
+|---|---|
+| `InstrumentAssemble` | Pipeline manager that stores components, builds transforms, executes `run()` / `run_until()`, maintains `history_log`, and renders 3D geometry. |
+
+Core methods on `InstrumentAssemble`:
+
+- `add_component(name, obj, transform=None, auto_chain=True)`
+- `run(initPos=None, initVel=None, initTime=None, initWeight=None, num_rays=None)`
+- `run_until(stage_name_or_index, ...)`
+- `get_history()`
+- `print_summary()`
+- `visualize_3d(show_edges=False)`
+
+### Optimization (`pyneutrace.simulation`)
+
+| Class | Description |
+|---|---|
+| `InstrumentOptimizer` | Parameter-registry-based optimizer that registers component attributes, evaluates objective functions, and calls SciPy minimizers / differential evolution. |
+
+Typical `InstrumentOptimizer` workflow:
+
+1. Build an `InstrumentAssemble` pipeline.
+2. Register tunable parameters with bounds using `register_parameter(...)`.
+3. Define a scalar objective over `(pos, vel, time, weight)`.
+4. Call `evaluate_once(...)` or `optimize(...)`.
 
 ### Visualization (`pyneutrace.visualization`)
 
 | Class | Description |
 |---|---|
-| **InstrumentSimPlot** | Generates Matplotlib dashboards summarizing transmission efficiency and "Virtual Monitor" beam profiles without requiring heavy memory storage during runs. |
+| `InstrumentSimPlot` | Matplotlib helpers for transmission summaries and virtual-monitor-style stage inspection. |
 
 ---
 
-## Physics & Architecture
+## Analyzer Diagnostics
 
-### Coordinate System
+`Analyzer` and `VAnalyzer` now provide an `exit_capture` dataset after propagation.
+
+- Default mode: `exit_capture_mode="position"`
+- Optional mode: `exit_capture_mode="full"`
+
+In `position` mode, `exit_capture` stores:
+
+- `x`
+- `y`
+- `z`
+- `weight`
+
+In `full` mode, it also stores:
+
+- `vx`
+- `vy`
+- `vz`
+- `time`
+
+Higher-level analyzer containers expose this automatically:
+
+- `CascadeAnalyzer.stage_results[i]["exit_capture"]`
+- `MultiCascadeAnalyzer.channel_results[i]["stage_results"][j]["exit_capture"]`
+
+This is intended for plotting and diagnostics without requiring embedded monitor components at every analyzer exit.
+
+---
+
+## Coordinate And Geometry Model
+
+### Global Convention
 
 ```text
-  X  →  Horizontal (perpendicular to the beam propagating direction)
-  Y  →  Vertical (up)
-  Z  →  Beam propagating direction 
+X : horizontal
+Y : vertical
+Z : nominal local beam direction
 ```
 
-**Local vs. Global Frames**  
-Each component in the instrument possesses its own local coordinate system. A component clearly defines its **entry window** (usually at $Z = 0$) and its **exit window** (usually at $Z = L$). 
+### Entry / Exit Frames
 
-`InstrumentAssemble` builds the instrument as a **seamless continuous pipeline**. This means all components, from the source to the detector, are connected back-to-back. The exit window of an upstream component becomes the exact mathematical entry window of the subsequent component. 
+Most transport components define:
 
-To achieve this:
-1. All surviving neutrons exiting a component are mathematically translated (and rotated, if the component bends the beam like a `CurvedGuide` or `Monochromator`) so that their positions and velocities are expressed perfectly relative to the **center of the exit window**.
-2. This allows the next component to simply assume the incoming beam is crossing its own $Z=0$ plane. 
-3. If physical empty space is required between two optical elements, a `Spacer` component must be explicitly inserted into the pipeline.
+- an entry frame, typically with the beam crossing `z = 0`
+- an exit frame published through `T_exit_from_entry`
 
-**The Sample Exception**  
-The only exception to the strict Entry/Exit window rule is the Sample environment. Because neutrons scattered from a sample diverge outward into the entire 3D sphere ($4\pi$ steradians), it is impossible to define a single planar "exit window". 
+`InstrumentAssemble` uses these transforms to connect components back-to-back in a continuous beamline. If physical drift space is needed, insert a `Spacer`.
 
-Instead, neutron coordinates scattered away from a sample use the **sample center** as their origin ($0,0,0$), with the incident primary beam defining the $+Z$ direction. Downstream components (such as a `RadCollimator` or `CylindMonitor`) are explicitly designed to account for this geometry, often utilizing cylindrical or spherical coordinates to capture the flying neutrons.
+### Sample-Centred Branches
 
-### Bragg Scattering
+Scattering components are the main exception to the simple planar chaining rule. After a sample, downstream components may use a sample-centred frame rather than a single exit plane. This is especially important for:
 
-For the `Monochromator`, `Analyzer`, and `PowderSample`, the Bragg condition is applied to filter and scatter neutrons at specific wavelengths. The momentum transfer vector $\vec{Q}$ is calculated for reciprocal lattice vectors $\vec{G}$ and the incident wavevector $\vec{k}_{in}$, ensuring that only neutrons satisfying $|\vec{k}_{out}| = |\vec{k}_{in}|$ and $\vec{Q} = \vec{G}$ are scattered with high probability according to their structure factors ($|F|^2$).
+- `RadCollimator`
+- `CylindMonitor`
+- `VAnalyzer`
+- `CascadeAnalyzer`
+- `MultiCascadeAnalyzer`
+
+These components support sample-centred transport and branch geometry explicitly.
+
+### 3D Geometry Export
+
+Physical components implement `get_mesh_pipeline()`, returning standardized items such as:
+
+- `structured_grid`
+- `polyline`
+- `polyline_loop`
+- `arrow`
+
+`InstrumentAssemble.visualize_3d()` transforms these local meshes into global coordinates and renders them with PyVista.
 
 ---
 
-## Known Limitations
+## Notes On Current Scope
 
-- **Gravity:** The impact of gravity ($\vec{g}$) has not yet been taken into account. Neutrons currently travel in perfectly straight lines between component boundaries.
-- **Detector Efficiency:** Monitors currently act as perfect 100% absorbing planes. Wavelength-dependent gas detection efficiency ($1 - \exp(-c\lambda)$) and finite depth tracking are not yet implemented.
-- **Inelastic Scattering:** Sample kernels for inelastic energy transfer ($S(Q, \omega)$) to simulate phonons and magnons are not yet supported.
+- Gravity is not included; neutrons travel in straight-line segments between component interactions.
+- Detector efficiency models are still simplified; monitors act as idealized capture surfaces.
+- Inelastic sample kernels are not yet a focus of the current implementation.
+- Some legacy or comparison modules remain in the tree with names such as `*_v0` or `*_new`; the README above documents the currently active classes exposed through the main package interfaces.
