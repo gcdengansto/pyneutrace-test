@@ -239,6 +239,10 @@ Scattering components are the main exception to the simple planar chaining rule.
 
 These components support sample-centred transport and branch geometry explicitly.
 
+Here are two examples:
+![Figure](radcollimator_demo.png)
+![Figure](multicascadeanalyzer_tas_demo.png)
+
 ### 3D Geometry Export
 
 Physical components implement `get_mesh_pipeline()`, returning standardized items such as:
