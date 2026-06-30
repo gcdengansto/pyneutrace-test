@@ -46,11 +46,13 @@ pyneutrace/
 
 ## Installation
 
-Install the package from the project root:
+Install the package from PyPi:
 
 ```bash
-pip install .
+pip install pyneutrace
 ```
+Please check the details on the PyPi webpage:
+[pyneutrace](https://pypi.org/project/pyneutrace/)
 
 For 3D geometry rendering, ensure PyVista is available in your environment.
 
