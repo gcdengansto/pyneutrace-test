@@ -262,5 +262,3 @@ Physical components implement `get_mesh_pipeline()`, returning standardized item
 
 - Gravity is not included; neutrons travel in straight-line segments between component interactions.
 - Detector efficiency models are still simplified; monitors act as idealized capture surfaces.
-- Inelastic sample kernels are not yet a focus of the current implementation.
-- Some legacy or comparison modules remain in the tree with names such as `*_v0` or `*_new`; the README above documents the currently active classes exposed through the main package interfaces.
